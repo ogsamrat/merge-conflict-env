@@ -173,8 +173,12 @@ def run_task(task_name: str) -> None:
             step_resp = call_env("/step", method="POST", payload={"action": action})
             observation = step_resp.get("observation", step_resp)
             # Read reward from top-level response first, fall back to observation field
-            raw_reward = step_resp.get("reward") or observation.get("reward") or 0.01
-            reward = max(0.01, min(0.99, float(raw_reward)))
+            raw_reward = step_resp.get("reward")
+            if raw_reward is None or raw_reward == 0:
+                raw_reward = observation.get("reward")
+            if raw_reward is None or raw_reward == 0:
+                raw_reward = 0.01
+            reward = max(0.01, min(0.99, round(float(raw_reward), 2)))
             done = step_resp.get("done", observation.get("done", False))
             error = observation.get("error") or "null"
 

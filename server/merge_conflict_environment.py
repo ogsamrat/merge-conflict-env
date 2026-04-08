@@ -241,9 +241,8 @@ class MergeConflictEnvironment(
         return self._state
 
     def close(self) -> None:
-        if self._workspace and os.path.exists(self._workspace):
-            shutil.rmtree(self._workspace, ignore_errors=True)
-        self._workspace = ""
+        """No-op: workspace cleanup is handled by reset()."""
+        pass
 
     # ── Action handlers ──
 
