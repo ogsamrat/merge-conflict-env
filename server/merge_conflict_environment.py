@@ -128,6 +128,7 @@ class MergeConflictEnvironment(
                 error=f"Available tasks: {available}",
                 done=False,
                 reward=SCORE_FLOOR,
+                info={"task_score": SCORE_FLOOR},
             )
 
         self._task_config = TASK_REGISTRY[task_id]
@@ -146,6 +147,7 @@ class MergeConflictEnvironment(
                 error=str(e),
                 done=False,
                 reward=SCORE_FLOOR,
+                info={"task_score": SCORE_FLOOR},
             )
 
         self._gold_contents = self._load_gold_resolutions()
@@ -175,7 +177,10 @@ class MergeConflictEnvironment(
             difficulty=self._task_config["difficulty"],
             done=False,
             reward=SCORE_FLOOR,
-            info={"available_actions": ["list_conflicts", "view_file", "view_context", "resolve_file", "run_tests", "submit"]},
+            info={
+                "available_actions": ["list_conflicts", "view_file", "view_context", "resolve_file", "run_tests", "submit"],
+                "task_score": SCORE_FLOOR,
+            },
         )
 
     def step(
@@ -194,6 +199,7 @@ class MergeConflictEnvironment(
                 error="No active workspace",
                 done=False,
                 reward=SCORE_FLOOR,
+                info={"task_score": SCORE_FLOOR},
             )
 
         self._state.step_count += 1
@@ -233,6 +239,14 @@ class MergeConflictEnvironment(
 
         obs.reward = clamp_reward(obs.reward)
         self._state.total_reward = round(self._state.total_reward + obs.reward, 4)
+
+        if "task_score" not in obs.info:
+            n_files = len(self._task_config.get("files", []))
+            per_file_max = MARKER_REMOVAL_REWARD + SYNTAX_VALID_REWARD + MAX_SIMILARITY_REWARD
+            max_possible = n_files * per_file_max + MAX_TEST_REWARD
+            if max_possible <= 0:
+                max_possible = 0.82
+            obs.info["task_score"] = clamp_reward(self._state.total_reward / max_possible)
 
         return obs
 

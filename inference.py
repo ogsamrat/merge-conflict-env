@@ -23,7 +23,10 @@ if HF_TOKEN is None:
 
 client = OpenAI(base_url=API_BASE_URL, api_key=HF_TOKEN)
 
-ENV_BASE_URL = os.getenv("ENV_BASE_URL", "http://localhost:8000")
+ENV_BASE_URL = os.getenv(
+    "ENV_BASE_URL",
+    "https://xamrat-merge-conflict-env.hf.space",
+)
 
 TASKS = ["easy_simple_text", "medium_code_logic", "hard_multi_file"]
 
@@ -180,7 +183,8 @@ def run_task(task_name: str) -> None:
                 raw_reward = 0.01
             reward = max(0.01, min(0.99, round(float(raw_reward), 2)))
             done = step_resp.get("done", observation.get("done", False))
-            error = observation.get("error") or "null"
+            raw_error = observation.get("error") or "null"
+            error = str(raw_error).replace("\n", " ").replace("\r", " ")[:200]
 
             step_num += 1
             rewards.append(reward)
@@ -201,12 +205,13 @@ def run_task(task_name: str) -> None:
 
     except Exception as e:
         traceback.print_exc(file=sys.stderr)
+        safe_error = str(e).replace("\n", " ").replace("\r", " ")[:200]
         print(
             f"[STEP]  step={step_num + 1} "
             f"action=error "
             f"reward=0.01 "
             f"done=true "
-            f"error={str(e)}"
+            f"error={safe_error}"
         )
         rewards.append(0.01)
 

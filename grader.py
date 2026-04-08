@@ -84,6 +84,7 @@ def grade_resolution(
 
     Returns:
         (total_score, breakdown_dict) where breakdown shows each component.
+        All breakdown values are clamped to [SCORE_FLOOR, SCORE_CEIL].
     """
     breakdown: Dict[str, float] = {}
     score = 0.0
@@ -93,14 +94,14 @@ def grade_resolution(
         score += MARKER_REMOVAL_REWARD
         breakdown["markers_removed"] = MARKER_REMOVAL_REWARD
     else:
-        breakdown["markers_removed"] = 0.0
+        breakdown["markers_removed"] = SCORE_FLOOR
 
     if is_python_file(file_path):
         if is_syntactically_valid_python(resolved_content):
             score += SYNTAX_VALID_REWARD
             breakdown["syntax_valid"] = SYNTAX_VALID_REWARD
         else:
-            breakdown["syntax_valid"] = 0.0
+            breakdown["syntax_valid"] = SCORE_FLOOR
     else:
         score += SYNTAX_VALID_REWARD
         breakdown["syntax_valid"] = SYNTAX_VALID_REWARD
@@ -108,8 +109,8 @@ def grade_resolution(
     similarity = compute_similarity(resolved_content, gold_content)
     sim_reward = similarity * MAX_SIMILARITY_REWARD
     score += sim_reward
-    breakdown["similarity"] = round(sim_reward, 4)
-    breakdown["similarity_ratio"] = round(similarity, 4)
+    breakdown["similarity"] = max(SCORE_FLOOR, round(sim_reward, 4))
+    breakdown["similarity_ratio"] = max(SCORE_FLOOR, round(similarity, 4))
 
     return clamp_reward(score), breakdown
 
