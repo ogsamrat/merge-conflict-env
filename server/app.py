@@ -3,6 +3,10 @@ FastAPI application for the Merge Conflict Resolution Environment.
 
 Custom server that manages a single shared environment instance
 for stateful HTTP reset/step/state interactions.
+
+Response format matches the official OpenEnv serialize_observation:
+  - "observation" dict EXCLUDES reward, done, metadata
+  - "reward" and "done" are top-level only
 """
 
 from __future__ import annotations
@@ -60,16 +64,31 @@ _PER_FILE_MAX = MARKER_REMOVAL_REWARD + SYNTAX_VALID_REWARD + MAX_SIMILARITY_REW
 
 
 def _max_episode_reward(n_files: int) -> float:
-    """Max grading reward achievable in a single episode."""
     return n_files * _PER_FILE_MAX + MAX_TEST_REWARD
 
 
 def _normalized_score(total_reward: float, n_files: int) -> float:
-    """Return total_reward normalized to (0, 1) based on max possible."""
     max_r = _max_episode_reward(n_files)
     if max_r <= 0:
         return SCORE_FLOOR
     return clamp_reward(total_reward / max_r)
+
+
+def _serialize(obs: MergeConflictObservation, reward_override: float | None = None):
+    """Serialize observation matching official OpenEnv format.
+
+    Excludes reward/done/metadata from obs dict — they go top-level only.
+    """
+    reward = clamp_reward(
+        reward_override if reward_override is not None
+        else (obs.reward if obs.reward is not None else SCORE_FLOOR)
+    )
+    obs_dict = obs.model_dump(exclude={"reward", "done", "metadata"})
+    return {
+        "observation": obs_dict,
+        "reward": reward,
+        "done": bool(obs.done),
+    }
 
 
 class ResetRequest(BaseModel):
@@ -132,12 +151,7 @@ async def reset(raw_request: Request):
             episode_id=req.episode_id,
             task_id=req.task_id,
         )
-        reward = clamp_reward(obs.reward if hasattr(obs, "reward") else SCORE_FLOOR)
-        return {
-            "observation": obs.model_dump(),
-            "reward": reward,
-            "done": obs.done if hasattr(obs, "done") else False,
-        }
+        return _serialize(obs)
     except Exception as exc:
         obs = MergeConflictObservation(
             success=False,
@@ -146,11 +160,7 @@ async def reset(raw_request: Request):
             done=False,
             reward=SCORE_FLOOR,
         )
-        return {
-            "observation": obs.model_dump(),
-            "reward": SCORE_FLOOR,
-            "done": False,
-        }
+        return _serialize(obs)
 
 
 @app.post("/step")
@@ -158,7 +168,6 @@ async def step(raw_request: Request):
     try:
         body = await raw_request.body()
         data = _json.loads(body) if body and body.strip() else {}
-        # Accept both {"action": {...}} and flat {"action_type": ...} formats
         if "action" not in data and "action_type" in data:
             data = {"action": data}
         req = StepRequest(**data)
@@ -167,24 +176,11 @@ async def step(raw_request: Request):
         obs = env.step(action, timeout_s=req.timeout_s)
 
         if obs.done:
-            n_files = len(env._task_config.get("files", [1]))
+            n_files = len(env._task_config.get("files", ["_"]))
             task_score = _normalized_score(env.state.total_reward, n_files)
-            obs_dict = obs.model_dump()
-            obs_dict["reward"] = task_score
-            if isinstance(obs_dict.get("info"), dict):
-                obs_dict["info"]["task_score"] = task_score
-            return {
-                "observation": obs_dict,
-                "reward": task_score,
-                "done": True,
-            }
+            return _serialize(obs, reward_override=task_score)
 
-        reward = clamp_reward(obs.reward if hasattr(obs, "reward") else SCORE_FLOOR)
-        return {
-            "observation": obs.model_dump(),
-            "reward": reward,
-            "done": obs.done if hasattr(obs, "done") else False,
-        }
+        return _serialize(obs)
     except Exception as exc:
         obs = MergeConflictObservation(
             success=False,
@@ -193,21 +189,15 @@ async def step(raw_request: Request):
             done=False,
             reward=SCORE_FLOOR,
         )
-        return {
-            "observation": obs.model_dump(),
-            "reward": SCORE_FLOOR,
-            "done": False,
-        }
+        return _serialize(obs)
 
 
 @app.get("/state")
 async def state():
     data = env.state.model_dump()
-    n_files = len(env._task_config.get("files", [1])) if env._task_config else 1
+    n_files = len(env._task_config.get("files", ["_"])) if env._task_config else 1
     data["total_reward"] = clamp_reward(data.get("total_reward", SCORE_FLOOR))
-    data["normalized_score"] = _normalized_score(
-        env.state.total_reward, n_files
-    )
+    data["normalized_score"] = _normalized_score(env.state.total_reward, n_files)
     return data
 
 

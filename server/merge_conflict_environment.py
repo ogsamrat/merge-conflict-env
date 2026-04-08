@@ -390,13 +390,15 @@ class MergeConflictEnvironment(
 
         n_files = len(self._task_config.get("files", []))
         per_file_max = MARKER_REMOVAL_REWARD + SYNTAX_VALID_REWARD + MAX_SIMILARITY_REWARD
-        max_possible = max(n_files * per_file_max + MAX_TEST_REWARD, 1.0)
+        max_possible = n_files * per_file_max + MAX_TEST_REWARD
+        if max_possible <= 0:
+            max_possible = 0.82
         task_score = clamp_reward(self._state.total_reward / max_possible)
 
         if unresolved > 0:
-            message = f"Submitted with {unresolved} unresolved conflict(s). Score: {task_score:.4f}"
+            message = f"Submitted with {unresolved} unresolved conflict(s). Score: {task_score:.2f}"
         else:
-            message = f"All conflicts resolved! Score: {task_score:.4f}"
+            message = f"All conflicts resolved! Score: {task_score:.2f}"
 
         return MergeConflictObservation(
             success=unresolved == 0,
@@ -408,11 +410,7 @@ class MergeConflictEnvironment(
             difficulty=self._state.difficulty,
             done=True,
             reward=task_score,
-            info={
-                "task_score": task_score,
-                "total_episode_reward": self._state.total_reward,
-                "max_possible_reward": max_possible,
-            },
+            info={"task_score": task_score},
         )
 
     # ── Internal helpers ──
