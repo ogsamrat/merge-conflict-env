@@ -4,3 +4,5 @@ type: space
 runtime: fastapi
 app: server.app:app
 port: 8000
+description: "Resolve git merge conflicts across files of increasing difficulty"
+tasks: [easy_simple_text, medium_code_logic, hard_multi_file]

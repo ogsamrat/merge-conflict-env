@@ -143,13 +143,23 @@ def call_env(endpoint: str, method: str = "GET", payload: dict | None = None) ->
         return {"error": str(e)}
 
 
-def run_task(task_name: str) -> None:
-    """Run a single task episode."""
-    print(f"[START] task={task_name} env=merge_conflict model={MODEL_NAME}")
+SCORE_MIN = 0.01
+SCORE_MAX = 0.99
+
+
+def strict_score(value: float) -> float:
+    """Clamp to strictly (0, 1) range."""
+    return round(max(SCORE_MIN, min(SCORE_MAX, float(value))), 2)
+
+
+def run_task(task_name: str) -> float:
+    """Run a single task episode. Returns the final task score."""
+    print(f"[START] task={task_name} env=merge_conflict model={MODEL_NAME}", flush=True)
 
     rewards: list[float] = []
     step_num = 0
     is_success = False
+    final_score = SCORE_MIN
     max_steps = 25
 
     try:
@@ -175,13 +185,12 @@ def run_task(task_name: str) -> None:
 
             step_resp = call_env("/step", method="POST", payload={"action": action})
             observation = step_resp.get("observation", step_resp)
-            # Read reward from top-level response first, fall back to observation field
             raw_reward = step_resp.get("reward")
             if raw_reward is None or raw_reward == 0:
                 raw_reward = observation.get("reward")
             if raw_reward is None or raw_reward == 0:
-                raw_reward = 0.01
-            reward = max(0.01, min(0.99, round(float(raw_reward), 2)))
+                raw_reward = SCORE_MIN
+            reward = strict_score(float(raw_reward))
             done = step_resp.get("done", observation.get("done", False))
             raw_error = observation.get("error") or "null"
             error = str(raw_error).replace("\n", " ").replace("\r", " ")[:200]
@@ -195,13 +204,28 @@ def run_task(task_name: str) -> None:
                 f"action={action_str} "
                 f"reward={reward:.2f} "
                 f"done={'true' if done else 'false'} "
-                f"error={error}"
+                f"error={error}",
+                flush=True,
             )
+
+            # Update running score from info if available
+            info = observation.get("info", {})
+            if isinstance(info, dict) and "task_score" in info:
+                final_score = strict_score(float(info["task_score"]))
+            elif done:
+                final_score = reward
 
             messages.append({"role": "assistant", "content": assistant_text})
             messages.append({"role": "user", "content": make_observation_prompt(observation)})
 
         is_success = observation.get("success", False) and observation.get("conflicts_remaining", 1) == 0
+
+        # Use last task_score from info if available, else last reward
+        info = observation.get("info", {})
+        if isinstance(info, dict) and "task_score" in info:
+            final_score = strict_score(float(info["task_score"]))
+        elif rewards:
+            final_score = strict_score(rewards[-1])
 
     except Exception as e:
         traceback.print_exc(file=sys.stderr)
@@ -209,18 +233,23 @@ def run_task(task_name: str) -> None:
         print(
             f"[STEP] step={step_num + 1} "
             f"action=error "
-            f"reward=0.01 "
+            f"reward={SCORE_MIN:.2f} "
             f"done=true "
-            f"error={safe_error}"
+            f"error={safe_error}",
+            flush=True,
         )
-        rewards.append(0.01)
+        rewards.append(SCORE_MIN)
+        final_score = SCORE_MIN
 
     rewards_str = ",".join(f"{r:.2f}" for r in rewards)
     print(
         f"[END] success={'true' if is_success else 'false'} "
         f"steps={step_num} "
-        f"rewards={rewards_str}"
+        f"score={final_score:.2f} "
+        f"rewards={rewards_str}",
+        flush=True,
     )
+    return final_score
 
 
 def main():
@@ -229,8 +258,10 @@ def main():
     sys.stderr.write(f"API: {API_BASE_URL}\n")
     sys.stderr.write(f"Env: {ENV_BASE_URL}\n")
 
+    scores = []
     for task in TASKS:
-        run_task(task)
+        scores.append(run_task(task))
+    return scores
 
 
 if __name__ == "__main__":
