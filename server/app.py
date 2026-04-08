@@ -79,7 +79,7 @@ class ResetRequest(BaseModel):
 
 
 class StepRequest(BaseModel):
-    action: Dict[str, Any]
+    action: Dict[str, Any] = {}
     timeout_s: Optional[float] = None
 
 
@@ -120,57 +120,84 @@ async def schema():
 
 @app.post("/reset")
 async def reset(raw_request: Request):
-    body = await raw_request.body()
-    if body and body.strip():
-        data = _json.loads(body)
-        req = ResetRequest(**data)
-    else:
-        req = ResetRequest()
-    obs = env.reset(
-        seed=req.seed,
-        episode_id=req.episode_id,
-        task_id=req.task_id,
-    )
-    reward = clamp_reward(obs.reward if hasattr(obs, "reward") else SCORE_FLOOR)
-    return {
-        "observation": obs.model_dump(),
-        "reward": reward,
-        "done": obs.done if hasattr(obs, "done") else False,
-    }
+    try:
+        body = await raw_request.body()
+        if body and body.strip():
+            data = _json.loads(body)
+            req = ResetRequest(**data)
+        else:
+            req = ResetRequest()
+        obs = env.reset(
+            seed=req.seed,
+            episode_id=req.episode_id,
+            task_id=req.task_id,
+        )
+        reward = clamp_reward(obs.reward if hasattr(obs, "reward") else SCORE_FLOOR)
+        return {
+            "observation": obs.model_dump(),
+            "reward": reward,
+            "done": obs.done if hasattr(obs, "done") else False,
+        }
+    except Exception as exc:
+        obs = MergeConflictObservation(
+            success=False,
+            message=f"Reset failed: {exc}",
+            error=str(exc),
+            done=False,
+            reward=SCORE_FLOOR,
+        )
+        return {
+            "observation": obs.model_dump(),
+            "reward": SCORE_FLOOR,
+            "done": False,
+        }
 
 
 @app.post("/step")
 async def step(raw_request: Request):
-    body = await raw_request.body()
-    data = _json.loads(body) if body and body.strip() else {}
-    # Accept both {"action": {...}} and flat {"action_type": ...} formats
-    if "action" not in data and "action_type" in data:
-        data = {"action": data}
-    req = StepRequest(**data)
-    action_data = req.action
-    action = MergeConflictAction(**action_data)
-    obs = env.step(action, timeout_s=req.timeout_s)
+    try:
+        body = await raw_request.body()
+        data = _json.loads(body) if body and body.strip() else {}
+        # Accept both {"action": {...}} and flat {"action_type": ...} formats
+        if "action" not in data and "action_type" in data:
+            data = {"action": data}
+        req = StepRequest(**data)
+        action_data = req.action or {}
+        action = MergeConflictAction(**action_data)
+        obs = env.step(action, timeout_s=req.timeout_s)
 
-    if obs.done:
-        # Final task score: total reward normalized by max achievable
-        n_files = len(env._task_config.get("files", [1]))
-        task_score = _normalized_score(env.state.total_reward, n_files)
-        obs_dict = obs.model_dump()
-        obs_dict["reward"] = task_score
-        if isinstance(obs_dict.get("info"), dict):
-            obs_dict["info"]["task_score"] = task_score
+        if obs.done:
+            n_files = len(env._task_config.get("files", [1]))
+            task_score = _normalized_score(env.state.total_reward, n_files)
+            obs_dict = obs.model_dump()
+            obs_dict["reward"] = task_score
+            if isinstance(obs_dict.get("info"), dict):
+                obs_dict["info"]["task_score"] = task_score
+            return {
+                "observation": obs_dict,
+                "reward": task_score,
+                "done": True,
+            }
+
+        reward = clamp_reward(obs.reward if hasattr(obs, "reward") else SCORE_FLOOR)
         return {
-            "observation": obs_dict,
-            "reward": task_score,
-            "done": True,
+            "observation": obs.model_dump(),
+            "reward": reward,
+            "done": obs.done if hasattr(obs, "done") else False,
         }
-
-    reward = clamp_reward(obs.reward if hasattr(obs, "reward") else SCORE_FLOOR)
-    return {
-        "observation": obs.model_dump(),
-        "reward": reward,
-        "done": obs.done if hasattr(obs, "done") else False,
-    }
+    except Exception as exc:
+        obs = MergeConflictObservation(
+            success=False,
+            message=f"Step failed: {exc}",
+            error=str(exc),
+            done=False,
+            reward=SCORE_FLOOR,
+        )
+        return {
+            "observation": obs.model_dump(),
+            "reward": SCORE_FLOOR,
+            "done": False,
+        }
 
 
 @app.get("/state")
