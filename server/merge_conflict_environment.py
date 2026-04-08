@@ -88,7 +88,7 @@ class MergeConflictEnvironment(
     resolve conflicts file-by-file, and receive incremental rewards.
     """
 
-    SUPPORTS_CONCURRENT_SESSIONS: bool = True
+    SUPPORTS_CONCURRENT_SESSIONS: bool = False
 
     def __init__(self, workspace_base: str | None = None):
         super().__init__()
