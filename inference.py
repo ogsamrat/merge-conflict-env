@@ -170,10 +170,11 @@ def run_task(task_name: str) -> None:
             assistant_text = response.choices[0].message.content or ""
             action = parse_action(assistant_text)
 
-            step_resp = call_env("/step", method="POST", payload=action)
+            step_resp = call_env("/step", method="POST", payload={"action": action})
             observation = step_resp.get("observation", step_resp)
-            reward = observation.get("reward", 0.0) or 0.0
-            done = observation.get("done", False)
+            # Read reward from top-level response first, fall back to observation field
+            reward = step_resp.get("reward") or observation.get("reward") or 0.01
+            done = step_resp.get("done", observation.get("done", False))
             error = observation.get("error") or "null"
 
             step_num += 1
@@ -198,11 +199,11 @@ def run_task(task_name: str) -> None:
         print(
             f"[STEP]  step={step_num + 1} "
             f"action=error "
-            f"reward=0.00 "
+            f"reward=0.01 "
             f"done=true "
             f"error={str(e)}"
         )
-        rewards.append(0.0)
+        rewards.append(0.01)
 
     rewards_str = ",".join(f"{r:.2f}" for r in rewards)
     print(

@@ -140,10 +140,16 @@ async def reset(raw_request: Request):
 
 
 @app.post("/step")
-async def step(request: StepRequest):
-    action_data = request.action
+async def step(raw_request: Request):
+    body = await raw_request.body()
+    data = _json.loads(body) if body and body.strip() else {}
+    # Accept both {"action": {...}} and flat {"action_type": ...} formats
+    if "action" not in data and "action_type" in data:
+        data = {"action": data}
+    req = StepRequest(**data)
+    action_data = req.action
     action = MergeConflictAction(**action_data)
-    obs = env.step(action, timeout_s=request.timeout_s)
+    obs = env.step(action, timeout_s=req.timeout_s)
 
     if obs.done:
         # Final task score: total reward normalized by max achievable
