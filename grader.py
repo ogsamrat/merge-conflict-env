@@ -33,12 +33,16 @@ SCORE_CEIL = 0.99
 
 
 def clamp_reward(score: float) -> float:
-    """Clamp reward to strictly within (0, 1) -- never exactly 0.0 or 1.0."""
-    if score <= 0.0:
+    """Clamp reward to strictly within (0, 1), rounded to 2 decimal places.
+
+    Rounds first so that formatted output (.2f) is never 0.00 or 1.00.
+    """
+    rounded = round(score, 2)
+    if rounded <= 0.0:
         return SCORE_FLOOR
-    if score >= 1.0:
+    if rounded >= 1.0:
         return SCORE_CEIL
-    return round(score, 4)
+    return rounded
 
 
 def has_conflict_markers(content: str) -> bool:
