@@ -14,9 +14,11 @@ from fastapi.responses import RedirectResponse
 from pydantic import BaseModel
 
 try:
+    from merge_conflict_env.grader import clamp_reward
     from merge_conflict_env.models import MergeConflictAction, MergeConflictObservation
     from merge_conflict_env.server.merge_conflict_environment import MergeConflictEnvironment
 except ImportError:
+    from grader import clamp_reward
     from models import MergeConflictAction, MergeConflictObservation
     from server.merge_conflict_environment import MergeConflictEnvironment
 
@@ -79,9 +81,10 @@ async def reset(raw_request: Request):
         episode_id=req.episode_id,
         task_id=req.task_id,
     )
+    reward = clamp_reward(obs.reward if hasattr(obs, "reward") else 0.01)
     return {
         "observation": obs.model_dump(),
-        "reward": obs.reward if hasattr(obs, "reward") else 0.0,
+        "reward": reward,
         "done": obs.done if hasattr(obs, "done") else False,
     }
 
@@ -91,16 +94,19 @@ async def step(request: StepRequest):
     action_data = request.action
     action = MergeConflictAction(**action_data)
     obs = env.step(action, timeout_s=request.timeout_s)
+    reward = clamp_reward(obs.reward if hasattr(obs, "reward") else 0.01)
     return {
         "observation": obs.model_dump(),
-        "reward": obs.reward if hasattr(obs, "reward") else 0.0,
+        "reward": reward,
         "done": obs.done if hasattr(obs, "done") else False,
     }
 
 
 @app.get("/state")
 async def state():
-    return env.state.model_dump()
+    data = env.state.model_dump()
+    data["total_reward"] = clamp_reward(data.get("total_reward", 0.01))
+    return data
 
 
 def main():

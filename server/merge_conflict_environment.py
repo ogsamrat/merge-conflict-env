@@ -29,6 +29,8 @@ try:
     from merge_conflict_env.grader import (
         EXPLORATION_REWARD,
         INVALID_ACTION_PENALTY,
+        SCORE_FLOOR,
+        clamp_reward,
         compute_step_penalty,
         grade_resolution,
         grade_test_run,
@@ -43,6 +45,8 @@ except ImportError:
     from grader import (
         EXPLORATION_REWARD,
         INVALID_ACTION_PENALTY,
+        SCORE_FLOOR,
+        clamp_reward,
         compute_step_penalty,
         grade_resolution,
         grade_test_run,
@@ -115,7 +119,7 @@ class MergeConflictEnvironment(
                 message=f"Unknown task_id: {task_id}",
                 error=f"Available tasks: {available}",
                 done=False,
-                reward=0.0,
+                reward=SCORE_FLOOR,
             )
 
         self._task_config = TASK_REGISTRY[task_id]
@@ -133,7 +137,7 @@ class MergeConflictEnvironment(
                 message="Failed to set up task",
                 error=str(e),
                 done=False,
-                reward=0.0,
+                reward=SCORE_FLOOR,
             )
 
         self._gold_contents = self._load_gold_resolutions()
@@ -162,7 +166,7 @@ class MergeConflictEnvironment(
             task_id=task_id,
             difficulty=self._task_config["difficulty"],
             done=False,
-            reward=0.0,
+            reward=SCORE_FLOOR,
             info={"available_actions": ["list_conflicts", "view_file", "view_context", "resolve_file", "run_tests", "submit"]},
         )
 
@@ -181,7 +185,7 @@ class MergeConflictEnvironment(
                 message="Environment not initialized. Call reset() first.",
                 error="No active workspace",
                 done=False,
-                reward=0.0,
+                reward=SCORE_FLOOR,
             )
 
         self._state.step_count += 1
@@ -206,19 +210,20 @@ class MergeConflictEnvironment(
                     success=False,
                     message=f"Unknown action_type: {action.action_type}",
                     error="Valid types: list_conflicts, view_file, view_context, resolve_file, run_tests, submit",
-                    reward=-INVALID_ACTION_PENALTY,
+                    reward=SCORE_FLOOR,
                 )
         except Exception as e:
             obs = MergeConflictObservation(
                 success=False,
                 message=f"Action failed: {e}",
                 error=str(e),
-                reward=-INVALID_ACTION_PENALTY,
+                reward=SCORE_FLOOR,
             )
 
-        if step_penalty > 0 and obs.reward >= 0:
-            obs.reward = round(max(obs.reward - step_penalty, -0.1), 4)
+        if step_penalty > 0:
+            obs.reward = max(obs.reward - step_penalty, 0.01)
 
+        obs.reward = clamp_reward(obs.reward)
         self._state.total_reward = round(self._state.total_reward + obs.reward, 4)
 
         return obs
@@ -255,7 +260,7 @@ class MergeConflictEnvironment(
                 success=False,
                 message="file_path is required for view_file",
                 error="Missing file_path",
-                reward=-INVALID_ACTION_PENALTY,
+                reward=SCORE_FLOOR,
             )
 
         full_path = Path(self._workspace) / file_path
@@ -265,7 +270,7 @@ class MergeConflictEnvironment(
                 success=False,
                 message=f"File not found: {file_path}",
                 error=f"Available files: {available}",
-                reward=-INVALID_ACTION_PENALTY,
+                reward=SCORE_FLOOR,
             )
 
         content = full_path.read_text(encoding="utf-8")
@@ -303,7 +308,7 @@ class MergeConflictEnvironment(
                 success=False,
                 message="file_path is required for resolve_file",
                 error="Missing file_path",
-                reward=-INVALID_ACTION_PENALTY,
+                reward=SCORE_FLOOR,
             )
 
         if not content:
@@ -311,7 +316,7 @@ class MergeConflictEnvironment(
                 success=False,
                 message="content is required for resolve_file",
                 error="Missing content",
-                reward=-INVALID_ACTION_PENALTY,
+                reward=SCORE_FLOOR,
             )
 
         full_path = Path(self._workspace) / file_path
@@ -320,7 +325,7 @@ class MergeConflictEnvironment(
                 success=False,
                 message=f"File not found: {file_path}",
                 error="Invalid file_path",
-                reward=-INVALID_ACTION_PENALTY,
+                reward=SCORE_FLOOR,
             )
 
         gold = self._gold_contents.get(file_path, "")
@@ -374,7 +379,7 @@ class MergeConflictEnvironment(
         conflict_files = self._find_conflict_files()
         status = self._get_resolution_status()
 
-        total_score = self._state.total_reward
+        total_score = clamp_reward(self._state.total_reward)
         unresolved = len(conflict_files)
 
         if unresolved > 0:
@@ -391,7 +396,7 @@ class MergeConflictEnvironment(
             task_id=self._state.task_id,
             difficulty=self._state.difficulty,
             done=True,
-            reward=0.0,
+            reward=clamp_reward(0.01),
             info={"total_episode_reward": total_score},
         )
 

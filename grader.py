@@ -19,14 +19,26 @@ from typing import Dict, Tuple
 
 CONFLICT_MARKERS = ("<<<<<<< ", "=======", ">>>>>>> ")
 
-MARKER_REMOVAL_REWARD = 0.1
-SYNTAX_VALID_REWARD = 0.1
-MAX_SIMILARITY_REWARD = 0.6
-MAX_TEST_REWARD = 0.1
+MARKER_REMOVAL_REWARD = 0.09
+SYNTAX_VALID_REWARD = 0.09
+MAX_SIMILARITY_REWARD = 0.55
+MAX_TEST_REWARD = 0.09
 EXPLORATION_REWARD = 0.02
 STEP_PENALTY_THRESHOLD = 15
-STEP_PENALTY = 0.05
-INVALID_ACTION_PENALTY = 0.1
+STEP_PENALTY = 0.04
+INVALID_ACTION_PENALTY = 0.08
+
+SCORE_FLOOR = 0.01
+SCORE_CEIL = 0.99
+
+
+def clamp_reward(score: float) -> float:
+    """Clamp reward to strictly within (0, 1) -- never exactly 0.0 or 1.0."""
+    if score <= 0.0:
+        return SCORE_FLOOR
+    if score >= 1.0:
+        return SCORE_CEIL
+    return round(score, 4)
 
 
 def has_conflict_markers(content: str) -> bool:
@@ -95,7 +107,7 @@ def grade_resolution(
     breakdown["similarity"] = round(sim_reward, 4)
     breakdown["similarity_ratio"] = round(similarity, 4)
 
-    return round(score, 4), breakdown
+    return clamp_reward(score), breakdown
 
 
 def grade_test_run(test_dir: str, workspace_path: str) -> Tuple[float, str]:
@@ -115,7 +127,7 @@ def grade_test_run(test_dir: str, workspace_path: str) -> Tuple[float, str]:
         output = result.stdout + result.stderr
 
         if result.returncode == 0:
-            return MAX_TEST_REWARD, output
+            return clamp_reward(MAX_TEST_REWARD), output
 
         lines = output.splitlines()
         for line in reversed(lines):
@@ -129,18 +141,18 @@ def grade_test_run(test_dir: str, workspace_path: str) -> Tuple[float, str]:
                     total = passed + failed
                     if total > 0:
                         ratio = passed / total
-                        return round(ratio * MAX_TEST_REWARD, 4), output
+                        return clamp_reward(ratio * MAX_TEST_REWARD), output
                 except (ValueError, IndexError):
                     pass
             elif "passed" in line:
-                return MAX_TEST_REWARD, output
+                return clamp_reward(MAX_TEST_REWARD), output
 
-        return 0.0, output
+        return SCORE_FLOOR, output
 
     except subprocess.TimeoutExpired:
-        return 0.0, "Test execution timed out (30s limit)"
+        return SCORE_FLOOR, "Test execution timed out (30s limit)"
     except Exception as e:
-        return 0.0, f"Test execution failed: {e}"
+        return SCORE_FLOOR, f"Test execution failed: {e}"
 
 
 def compute_step_penalty(step_count: int) -> float:
