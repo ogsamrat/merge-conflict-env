@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, Optional
 
-from fastapi import FastAPI
+from fastapi import Body, FastAPI, Request
 from fastapi.responses import RedirectResponse
 from pydantic import BaseModel
 
@@ -66,13 +66,18 @@ async def schema():
 
 
 @app.post("/reset")
-async def reset(request: Optional[ResetRequest] = None):
-    if request is None:
-        request = ResetRequest()
+async def reset(raw_request: Request):
+    body = await raw_request.body()
+    if body and body.strip():
+        import json as _json
+        data = _json.loads(body)
+        req = ResetRequest(**data)
+    else:
+        req = ResetRequest()
     obs = env.reset(
-        seed=request.seed,
-        episode_id=request.episode_id,
-        task_id=request.task_id,
+        seed=req.seed,
+        episode_id=req.episode_id,
+        task_id=req.task_id,
     )
     return {
         "observation": obs.model_dump(),
