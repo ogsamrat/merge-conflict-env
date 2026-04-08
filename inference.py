@@ -191,7 +191,7 @@ def run_task(task_name: str) -> None:
 
             action_str = json.dumps(action, separators=(",", ":"))
             print(
-                f"[STEP]  step={step_num} "
+                f"[STEP] step={step_num} "
                 f"action={action_str} "
                 f"reward={reward:.2f} "
                 f"done={'true' if done else 'false'} "
@@ -207,7 +207,7 @@ def run_task(task_name: str) -> None:
         traceback.print_exc(file=sys.stderr)
         safe_error = str(e).replace("\n", " ").replace("\r", " ")[:200]
         print(
-            f"[STEP]  step={step_num + 1} "
+            f"[STEP] step={step_num + 1} "
             f"action=error "
             f"reward=0.01 "
             f"done=true "
@@ -217,22 +217,20 @@ def run_task(task_name: str) -> None:
 
     rewards_str = ",".join(f"{r:.2f}" for r in rewards)
     print(
-        f"[END]   success={'true' if is_success else 'false'} "
+        f"[END] success={'true' if is_success else 'false'} "
         f"steps={step_num} "
         f"rewards={rewards_str}"
     )
 
 
 def main():
-    print(f"Merge Conflict Resolver - Baseline Inference")
-    print(f"Model: {MODEL_NAME}")
-    print(f"API: {API_BASE_URL}")
-    print(f"Env: {ENV_BASE_URL}")
-    print("=" * 50)
+    sys.stderr.write(f"Merge Conflict Resolver - Baseline Inference\n")
+    sys.stderr.write(f"Model: {MODEL_NAME}\n")
+    sys.stderr.write(f"API: {API_BASE_URL}\n")
+    sys.stderr.write(f"Env: {ENV_BASE_URL}\n")
 
     for task in TASKS:
         run_task(task)
-        print()
 
 
 if __name__ == "__main__":
