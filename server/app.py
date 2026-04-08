@@ -25,6 +25,8 @@ except ImportError:
     from server.merge_conflict_environment import MergeConflictEnvironment
 
 
+from fastapi.responses import RedirectResponse
+
 app = create_app(
     MergeConflictEnvironment,
     MergeConflictAction,
@@ -32,6 +34,11 @@ app = create_app(
     env_name="merge_conflict_env",
     max_concurrent_envs=1,
 )
+
+
+@app.get("/", include_in_schema=False)
+async def root():
+    return RedirectResponse(url="/docs")
 
 
 def main(host: str = "0.0.0.0", port: int = 8000):
