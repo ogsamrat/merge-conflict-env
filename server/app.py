@@ -66,7 +66,9 @@ async def schema():
 
 
 @app.post("/reset")
-async def reset(request: ResetRequest):
+async def reset(request: Optional[ResetRequest] = None):
+    if request is None:
+        request = ResetRequest()
     obs = env.reset(
         seed=request.seed,
         episode_id=request.episode_id,
