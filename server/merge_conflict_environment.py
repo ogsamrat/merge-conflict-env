@@ -29,7 +29,11 @@ try:
     from merge_conflict_env.grader import (
         EXPLORATION_REWARD,
         INVALID_ACTION_PENALTY,
+        MAX_SIMILARITY_REWARD,
+        MAX_TEST_REWARD,
+        MARKER_REMOVAL_REWARD,
         SCORE_FLOOR,
+        SYNTAX_VALID_REWARD,
         clamp_reward,
         compute_step_penalty,
         grade_resolution,
@@ -45,7 +49,11 @@ except ImportError:
     from grader import (
         EXPLORATION_REWARD,
         INVALID_ACTION_PENALTY,
+        MAX_SIMILARITY_REWARD,
+        MAX_TEST_REWARD,
+        MARKER_REMOVAL_REWARD,
         SCORE_FLOOR,
+        SYNTAX_VALID_REWARD,
         clamp_reward,
         compute_step_penalty,
         grade_resolution,
@@ -378,14 +386,17 @@ class MergeConflictEnvironment(
     def _handle_submit(self) -> MergeConflictObservation:
         conflict_files = self._find_conflict_files()
         status = self._get_resolution_status()
-
-        total_score = clamp_reward(self._state.total_reward)
         unresolved = len(conflict_files)
 
+        n_files = len(self._task_config.get("files", []))
+        per_file_max = MARKER_REMOVAL_REWARD + SYNTAX_VALID_REWARD + MAX_SIMILARITY_REWARD
+        max_possible = max(n_files * per_file_max + MAX_TEST_REWARD, 1.0)
+        task_score = clamp_reward(self._state.total_reward / max_possible)
+
         if unresolved > 0:
-            message = f"Submitted with {unresolved} unresolved conflict(s). Total reward: {total_score:.2f}"
+            message = f"Submitted with {unresolved} unresolved conflict(s). Score: {task_score:.4f}"
         else:
-            message = f"All conflicts resolved! Total reward: {total_score:.2f}"
+            message = f"All conflicts resolved! Score: {task_score:.4f}"
 
         return MergeConflictObservation(
             success=unresolved == 0,
@@ -396,8 +407,12 @@ class MergeConflictEnvironment(
             task_id=self._state.task_id,
             difficulty=self._state.difficulty,
             done=True,
-            reward=clamp_reward(0.01),
-            info={"total_episode_reward": total_score},
+            reward=task_score,
+            info={
+                "task_score": task_score,
+                "total_episode_reward": self._state.total_reward,
+                "max_possible_reward": max_possible,
+            },
         )
 
     # ── Internal helpers ──

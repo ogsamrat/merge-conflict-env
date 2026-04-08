@@ -7,19 +7,44 @@ for stateful HTTP reset/step/state interactions.
 
 from __future__ import annotations
 
+import json as _json
 from typing import Any, Dict, Optional
 
-from fastapi import Body, FastAPI, Request
+from fastapi import FastAPI, Request
 from fastapi.responses import RedirectResponse
 from pydantic import BaseModel
 
 try:
-    from merge_conflict_env.grader import clamp_reward
-    from merge_conflict_env.models import MergeConflictAction, MergeConflictObservation
-    from merge_conflict_env.server.merge_conflict_environment import MergeConflictEnvironment
+    from merge_conflict_env.grader import (
+        MAX_SIMILARITY_REWARD,
+        MAX_TEST_REWARD,
+        MARKER_REMOVAL_REWARD,
+        SCORE_FLOOR,
+        SYNTAX_VALID_REWARD,
+        clamp_reward,
+    )
+    from merge_conflict_env.models import (
+        MergeConflictAction,
+        MergeConflictObservation,
+        MergeConflictState,
+    )
+    from merge_conflict_env.server.merge_conflict_environment import (
+        MergeConflictEnvironment,
+    )
 except ImportError:
-    from grader import clamp_reward
-    from models import MergeConflictAction, MergeConflictObservation
+    from grader import (
+        MAX_SIMILARITY_REWARD,
+        MAX_TEST_REWARD,
+        MARKER_REMOVAL_REWARD,
+        SCORE_FLOOR,
+        SYNTAX_VALID_REWARD,
+        clamp_reward,
+    )
+    from models import (
+        MergeConflictAction,
+        MergeConflictObservation,
+        MergeConflictState,
+    )
     from server.merge_conflict_environment import MergeConflictEnvironment
 
 
@@ -30,6 +55,21 @@ app = FastAPI(
 )
 
 env = MergeConflictEnvironment()
+
+_PER_FILE_MAX = MARKER_REMOVAL_REWARD + SYNTAX_VALID_REWARD + MAX_SIMILARITY_REWARD
+
+
+def _max_episode_reward(n_files: int) -> float:
+    """Max grading reward achievable in a single episode."""
+    return n_files * _PER_FILE_MAX + MAX_TEST_REWARD
+
+
+def _normalized_score(total_reward: float, n_files: int) -> float:
+    """Return total_reward normalized to (0, 1) based on max possible."""
+    max_r = _max_episode_reward(n_files)
+    if max_r <= 0:
+        return SCORE_FLOOR
+    return clamp_reward(total_reward / max_r)
 
 
 class ResetRequest(BaseModel):
@@ -43,12 +83,6 @@ class StepRequest(BaseModel):
     timeout_s: Optional[float] = None
 
 
-class StepResponse(BaseModel):
-    observation: Dict[str, Any]
-    reward: float
-    done: bool
-
-
 @app.get("/", include_in_schema=False)
 async def root():
     return RedirectResponse(url="/docs")
@@ -59,11 +93,28 @@ async def health():
     return {"status": "healthy", "service": "merge_conflict_env"}
 
 
+@app.get("/metadata")
+async def metadata():
+    return {
+        "name": "merge-conflict-env",
+        "description": (
+            "An OpenEnv RL environment where agents resolve git merge conflicts "
+            "across three difficulty levels: easy (1 file), medium (2 files), "
+            "and hard (4 files). Agents list conflicts, view file content, "
+            "examine git context, write resolutions, and run tests."
+        ),
+        "version": "0.1.0",
+        "author": "xamrat",
+        "tasks": ["easy_simple_text", "medium_code_logic", "hard_multi_file"],
+    }
+
+
 @app.get("/schema")
 async def schema():
     return {
         "action": MergeConflictAction.model_json_schema(),
         "observation": MergeConflictObservation.model_json_schema(),
+        "state": MergeConflictState.model_json_schema(),
     }
 
 
@@ -71,7 +122,6 @@ async def schema():
 async def reset(raw_request: Request):
     body = await raw_request.body()
     if body and body.strip():
-        import json as _json
         data = _json.loads(body)
         req = ResetRequest(**data)
     else:
@@ -81,7 +131,7 @@ async def reset(raw_request: Request):
         episode_id=req.episode_id,
         task_id=req.task_id,
     )
-    reward = clamp_reward(obs.reward if hasattr(obs, "reward") else 0.01)
+    reward = clamp_reward(obs.reward if hasattr(obs, "reward") else SCORE_FLOOR)
     return {
         "observation": obs.model_dump(),
         "reward": reward,
@@ -94,7 +144,22 @@ async def step(request: StepRequest):
     action_data = request.action
     action = MergeConflictAction(**action_data)
     obs = env.step(action, timeout_s=request.timeout_s)
-    reward = clamp_reward(obs.reward if hasattr(obs, "reward") else 0.01)
+
+    if obs.done:
+        # Final task score: total reward normalized by max achievable
+        n_files = len(env._task_config.get("files", [1]))
+        task_score = _normalized_score(env.state.total_reward, n_files)
+        obs_dict = obs.model_dump()
+        obs_dict["reward"] = task_score
+        if isinstance(obs_dict.get("info"), dict):
+            obs_dict["info"]["task_score"] = task_score
+        return {
+            "observation": obs_dict,
+            "reward": task_score,
+            "done": True,
+        }
+
+    reward = clamp_reward(obs.reward if hasattr(obs, "reward") else SCORE_FLOOR)
     return {
         "observation": obs.model_dump(),
         "reward": reward,
@@ -105,7 +170,11 @@ async def step(request: StepRequest):
 @app.get("/state")
 async def state():
     data = env.state.model_dump()
-    data["total_reward"] = clamp_reward(data.get("total_reward", 0.01))
+    n_files = len(env._task_config.get("files", [1])) if env._task_config else 1
+    data["total_reward"] = clamp_reward(data.get("total_reward", SCORE_FLOOR))
+    data["normalized_score"] = _normalized_score(
+        env.state.total_reward, n_files
+    )
     return data
 
 
