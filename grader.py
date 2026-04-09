@@ -75,6 +75,54 @@ def compute_similarity(resolved: str, gold: str) -> float:
     return SequenceMatcher(None, resolved.strip(), gold.strip()).ratio()
 
 
+def _ast_definition_names(code: str) -> set:
+    """Return names of all top-level and nested function/class definitions."""
+    try:
+        tree = ast.parse(code)
+        return {
+            node.name
+            for node in ast.walk(tree)
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))
+        }
+    except SyntaxError:
+        return set()
+
+
+def _ast_import_names(code: str) -> set:
+    """Return root module names of all imports."""
+    try:
+        tree = ast.parse(code)
+        names: set = set()
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                for alias in node.names:
+                    names.add(alias.name.split(".")[0])
+            elif isinstance(node, ast.ImportFrom) and node.module:
+                names.add(node.module.split(".")[0])
+        return names
+    except SyntaxError:
+        return set()
+
+
+def _semantic_similarity(resolved: str, gold: str) -> float:
+    """Weighted similarity: 60% text, 30% AST structure, 10% import coverage."""
+    text_sim = SequenceMatcher(None, resolved.strip(), gold.strip()).ratio()
+
+    gold_names = _ast_definition_names(gold)
+    resolved_names = _ast_definition_names(resolved)
+    ast_sim = (
+        len(resolved_names & gold_names) / len(gold_names) if gold_names else 1.0
+    )
+
+    gold_imports = _ast_import_names(gold)
+    resolved_imports = _ast_import_names(resolved)
+    import_sim = (
+        len(resolved_imports & gold_imports) / len(gold_imports) if gold_imports else 1.0
+    )
+
+    return 0.6 * text_sim + 0.3 * ast_sim + 0.1 * import_sim
+
+
 def grade_resolution(
     resolved_content: str,
     gold_content: str,
@@ -102,11 +150,28 @@ def grade_resolution(
             breakdown["syntax_valid"] = SYNTAX_VALID_REWARD
         else:
             breakdown["syntax_valid"] = SCORE_FLOOR
+
+        # Semantic similarity: text + AST structure + import coverage
+        similarity = _semantic_similarity(resolved_content, gold_content)
+        breakdown["ast_structure"] = max(
+            SCORE_FLOOR, round(
+                len(_ast_definition_names(resolved_content) & _ast_definition_names(gold_content))
+                / max(len(_ast_definition_names(gold_content)), 1),
+                4,
+            )
+        )
+        breakdown["import_coverage"] = max(
+            SCORE_FLOOR, round(
+                len(_ast_import_names(resolved_content) & _ast_import_names(gold_content))
+                / max(len(_ast_import_names(gold_content)), 1),
+                4,
+            )
+        )
     else:
         score += SYNTAX_VALID_REWARD
         breakdown["syntax_valid"] = SYNTAX_VALID_REWARD
+        similarity = compute_similarity(resolved_content, gold_content)
 
-    similarity = compute_similarity(resolved_content, gold_content)
     sim_reward = similarity * MAX_SIMILARITY_REWARD
     score += sim_reward
     breakdown["similarity"] = max(SCORE_FLOOR, round(sim_reward, 4))

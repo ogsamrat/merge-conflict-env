@@ -80,6 +80,17 @@ TASK_REGISTRY: Dict[str, Dict[str, Any]] = {
         "files": ["utils.py", "main.py"],
         "description": "Code function conflict across 2 files (2 files, 3 conflict blocks)",
     },
+    "medium_import_conflict": {
+        "difficulty": "medium",
+        "setup_module": "merge_conflict_env.tasks.medium_import_conflict.setup",
+        "gold_dir": TASKS_DIR / "medium_import_conflict" / "gold_resolution",
+        "test_dir": TASKS_DIR / "medium_import_conflict" / "tests",
+        "files": ["processor.py", "pipeline.py"],
+        "description": (
+            "Import & validation conflict: merge logging (import logging) and "
+            "regex validation (import re) branches (2 files, 4 conflict blocks)"
+        ),
+    },
     "hard_multi_file": {
         "difficulty": "hard",
         "setup_module": "merge_conflict_env.tasks.hard_multi_file.setup",
@@ -87,6 +98,18 @@ TASK_REGISTRY: Dict[str, Dict[str, Any]] = {
         "test_dir": TASKS_DIR / "hard_multi_file" / "tests",
         "files": ["config.py", "models.py", "utils.py", "api.py"],
         "description": "Multi-file refactor conflict (4 files, 5-6 conflict blocks)",
+    },
+    "expert_functional": {
+        "difficulty": "expert",
+        "setup_module": "merge_conflict_env.tasks.expert_functional.setup",
+        "gold_dir": TASKS_DIR / "expert_functional" / "gold_resolution",
+        "test_dir": TASKS_DIR / "expert_functional" / "tests",
+        "files": ["calculator.py", "main.py"],
+        "description": (
+            "Calculator safety + advanced math: merge type-safe divide (ZeroDivisionError) "
+            "with power/sqrt/absolute methods (2 files, 3 conflict blocks). "
+            "Tests require BOTH branches to be correctly merged."
+        ),
     },
 }
 
