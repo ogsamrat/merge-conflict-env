@@ -115,42 +115,59 @@ def grade_resolution(
     return clamp_reward(score), breakdown
 
 
+def _parse_pytest_results(output: str) -> Tuple[int, int]:
+    """Return (passed, total) from pytest summary line."""
+    for line in reversed(output.splitlines()):
+        if "passed" not in line and "failed" not in line and "error" not in line:
+            continue
+        parts = line.split()
+        passed = failed = 0
+        for i, part in enumerate(parts):
+            if part == "passed" and i > 0:
+                try:
+                    passed = int(parts[i - 1])
+                except ValueError:
+                    pass
+            if part in ("failed", "error") and i > 0:
+                try:
+                    failed += int(parts[i - 1])
+                except ValueError:
+                    pass
+        total = passed + failed
+        if total > 0:
+            return passed, total
+    return 0, 0
+
+
 def grade_test_run(test_dir: str, workspace_path: str) -> Tuple[float, str]:
     """Run pytest on the task's test suite and return (reward, output)."""
+    import os
+
+    env = os.environ.copy()
+    env["PYTHONPATH"] = workspace_path + os.pathsep + env.get("PYTHONPATH", "")
+
     try:
         result = subprocess.run(
             [
                 sys.executable, "-m", "pytest", test_dir,
-                "-v", "--tb=short",
+                "-v", "--tb=short", "--no-header",
                 f"--workspace-path={workspace_path}",
             ],
             capture_output=True,
             text=True,
             timeout=30,
             cwd=workspace_path,
+            env=env,
         )
         output = result.stdout + result.stderr
 
         if result.returncode == 0:
             return clamp_reward(MAX_TEST_REWARD), output
 
-        lines = output.splitlines()
-        for line in reversed(lines):
-            if "passed" in line and "failed" in line:
-                parts = line.split()
-                try:
-                    passed_idx = parts.index("passed") - 1
-                    failed_idx = parts.index("failed") - 1
-                    passed = int(parts[passed_idx])
-                    failed = int(parts[failed_idx])
-                    total = passed + failed
-                    if total > 0:
-                        ratio = passed / total
-                        return clamp_reward(ratio * MAX_TEST_REWARD), output
-                except (ValueError, IndexError):
-                    pass
-            elif "passed" in line:
-                return clamp_reward(MAX_TEST_REWARD), output
+        passed, total = _parse_pytest_results(output)
+        if total > 0:
+            ratio = passed / total
+            return clamp_reward(ratio * MAX_TEST_REWARD), output
 
         return SCORE_FLOOR, output
 

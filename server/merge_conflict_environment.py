@@ -100,7 +100,7 @@ class MergeConflictEnvironment(
     resolve conflicts file-by-file, and receive incremental rewards.
     """
 
-    SUPPORTS_CONCURRENT_SESSIONS: bool = False
+    SUPPORTS_CONCURRENT_SESSIONS: bool = True
 
     def __init__(self, workspace_base: str | None = None):
         super().__init__()
@@ -222,9 +222,9 @@ class MergeConflictEnvironment(
             else:
                 obs = MergeConflictObservation(
                     success=False,
-                    message=f"Unknown action_type: {action.action_type}",
-                    error="Valid types: list_conflicts, view_file, view_context, resolve_file, run_tests, submit",
-                    reward=SCORE_FLOOR,
+                    message=f"Unknown action_type: '{action.action_type}'. Valid: list_conflicts, view_file, view_context, resolve_file, run_tests, submit",
+                    error="invalid_action",
+                    reward=clamp_reward(SCORE_FLOOR - INVALID_ACTION_PENALTY + SCORE_FLOOR),
                 )
         except Exception as e:
             obs = MergeConflictObservation(
@@ -254,9 +254,35 @@ class MergeConflictEnvironment(
     def state(self) -> MergeConflictState:
         return self._state
 
+    def get_metadata(self):
+        meta = {
+            "name": "merge_conflict_env",
+            "description": (
+                "An RL environment for resolving Git merge conflicts. "
+                "Agents receive conflicted files, examine git context, "
+                "resolve conflicts file-by-file, and earn rewards based on "
+                "syntactic validity, semantic similarity to the gold resolution, "
+                "and functional test passage. Three difficulty levels: "
+                "easy (1 text file), medium (2 Python files), hard (4 Python files)."
+            ),
+            "version": "1.0.0",
+            "author": "Samrat",
+            "supports_concurrent_sessions": self.SUPPORTS_CONCURRENT_SESSIONS,
+            "tasks": list(TASK_REGISTRY.keys()),
+        }
+        try:
+            from openenv.core.env_server.types import EnvironmentMetadata
+            return EnvironmentMetadata(**meta)
+        except Exception:
+            return meta
+
     def close(self) -> None:
-        """No-op: workspace cleanup is handled by reset()."""
-        pass
+        """Cleanup workspace on session close."""
+        if self._workspace and os.path.exists(self._workspace):
+            try:
+                shutil.rmtree(self._workspace)
+            except Exception:
+                pass
 
     # ── Action handlers ──
 

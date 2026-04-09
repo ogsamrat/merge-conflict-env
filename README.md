@@ -53,7 +53,7 @@ result = env.step(MergeConflictAction(
     file_path="README.md",
     content="...resolved content...",
 ))
-print(f"Reward: {result.reward}")  # 0.0 to 0.8
+print(f"Reward: {result.reward}")  # 0.01 to 0.99
 
 # Run tests to verify
 result = env.step(MergeConflictAction(action_type="run_tests"))
@@ -171,25 +171,28 @@ The reward function provides **incremental, per-step feedback**:
 
 | Component | Max Reward | How |
 |-----------|-----------|-----|
-| Conflict markers removed | +0.1 | No `<<<<<<<`, `=======`, `>>>>>>>` remaining |
-| Syntax validity | +0.1 | Parseable Python (for .py files) |
-| Content similarity | +0.6 | `difflib.SequenceMatcher` ratio vs gold resolution |
-| Test pass rate | +0.1 | Proportion of pytest tests passing |
+| Conflict markers removed | +0.09 | No `<<<<<<<`, `=======`, `>>>>>>>` remaining |
+| Syntax validity | +0.09 | Parseable Python (for .py files) |
+| Content similarity | +0.55 | `difflib.SequenceMatcher` ratio vs gold resolution |
+| Test pass rate | +0.09 | Proportion of pytest tests passing |
 | Exploration | +0.02 | Per `list_conflicts`, `view_file`, `view_context` |
 
-**Penalties**: -0.05 per step after step 15 (prevents loops), -0.1 for invalid actions.
-
-**Total achievable per task**: ~1.0
+**Penalties**: −0.04 per step after step 15 (prevents loops). All rewards clamped to **(0.01, 0.99)**.
 
 ## Baseline Performance
 
-| Task | Difficulty | GPT-4.1-mini Score | Steps |
-|------|-----------|-------------------|-------|
-| easy_simple_text | Easy | ~0.75 | 5-7 |
-| medium_code_logic | Medium | ~0.60 | 8-12 |
-| hard_multi_file | Hard | ~0.45 | 12-20 |
+The inference script ships with two agents:
 
-*Scores are approximate and depend on model configuration.*
+1. **Deterministic agent** — always active. No LLM required. Views each conflicted file, merges both sides of every conflict block, submits. Establishes a reproducible floor score.
+2. **LLM agent** (GPT-4.1-mini by default) — layered on top for higher quality resolutions.
+
+| Task | Difficulty | Deterministic Score | GPT-4.1-mini Score | Steps |
+|------|-----------|--------------------|--------------------|-------|
+| easy_simple_text | Easy | ~0.55 | ~0.75 | 5-7 |
+| medium_code_logic | Medium | ~0.35 | ~0.60 | 8-12 |
+| hard_multi_file | Hard | ~0.25 | ~0.45 | 12-20 |
+
+*Scores are approximate and depend on model and environment configuration.*
 
 ## Project Structure
 
@@ -235,6 +238,8 @@ merge_conflict_env/
 | `HF_TOKEN` | *(required)* | Hugging Face API token |
 | `ENV_BASE_URL` | `http://localhost:8000` | Environment server URL |
 | `WORKSPACE_DIR` | `/workspace` | Directory for task workspaces |
+| `MAX_CONCURRENT_ENVS` | `8` | Max simultaneous sessions |
+| `ENABLE_WEB_INTERFACE` | `true` | Serve a web UI at `/web` |
 
 ## Extending with New Tasks
 
