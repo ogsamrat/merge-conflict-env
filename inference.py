@@ -16,12 +16,14 @@ from openai import OpenAI
 
 API_BASE_URL = os.getenv("API_BASE_URL", "https://api.openai.com/v1")
 MODEL_NAME = os.getenv("MODEL_NAME", "gpt-4.1-mini")
+# Validator injects API_KEY; HF_TOKEN is the fallback for local runs
 HF_TOKEN = os.getenv("HF_TOKEN")
+API_KEY = os.getenv("API_KEY") or HF_TOKEN
 
-if HF_TOKEN is None:
-    raise ValueError("HF_TOKEN environment variable is required")
+if API_KEY is None:
+    raise ValueError("API_KEY or HF_TOKEN environment variable is required")
 
-client = OpenAI(base_url=API_BASE_URL, api_key=HF_TOKEN)
+client = OpenAI(base_url=API_BASE_URL, api_key=API_KEY)
 
 ENV_BASE_URL = os.getenv(
     "ENV_BASE_URL",
@@ -186,47 +188,17 @@ def _resolve_conflict_markers(content: str) -> str:
     return "\n".join(result)
 
 
-def _deterministic_policy(observation: dict, step: int, resolved_files: set[str]) -> dict | None:
+def _nav_action(observation: dict, step: int) -> dict | None:
     """
-    Fallback policy that works without an LLM.
-    Mimics what a junior developer would do: list, view, resolve each conflict, test, submit.
+    Return a deterministic navigation action for the first two steps only.
+    All content-generating steps (view_file, resolve_file, submit) go to the LLM.
+    Returns None to signal the LLM should act.
     """
-    conflict_files = observation.get("conflict_files", [])
-    unresolved = [f for f in conflict_files if f not in resolved_files]
-
     if step == 1:
         return {"action_type": "list_conflicts"}
-
     if step == 2:
         return {"action_type": "view_context"}
-
-    # View then resolve each conflicted file
-    file_content = observation.get("file_content", "")
-    message = observation.get("message", "")
-
-    # If we just viewed a file and have its content, resolve it
-    if file_content and "<<<<<<< " in file_content:
-        current_file = None
-        for fname in unresolved:
-            if fname in message:
-                current_file = fname
-                break
-        if current_file is None and unresolved:
-            current_file = unresolved[0]
-        if current_file:
-            resolved = _resolve_conflict_markers(file_content)
-            resolved_files.add(current_file)
-            return {"action_type": "resolve_file", "file_path": current_file, "content": resolved}
-
-    # View next unresolved file
-    if unresolved:
-        return {"action_type": "view_file", "file_path": unresolved[0]}
-
-    # All resolved: run tests then submit
-    if observation.get("test_output") is None and step < 20:
-        return {"action_type": "run_tests"}
-
-    return {"action_type": "submit"}
+    return None
 
 
 def run_task(task_name: str) -> float:
@@ -249,13 +221,13 @@ def run_task(task_name: str) -> float:
         ]
 
         done = observation.get("done", False)
-        resolved_files: set[str] = set()
 
         while not done and step_num < max_steps:
-            # Try deterministic policy first; fall back to LLM
-            det_action = _deterministic_policy(observation, step_num + 1, resolved_files)
-            if det_action is not None:
-                action = det_action
+            # Steps 1-2: deterministic navigation (no LLM tokens spent)
+            # Step 3+: LLM decides everything (view, resolve, test, submit)
+            nav = _nav_action(observation, step_num + 1)
+            if nav is not None:
+                action = nav
                 assistant_text = json.dumps(action)
             else:
                 try:
@@ -267,8 +239,19 @@ def run_task(task_name: str) -> float:
                     )
                     assistant_text = response.choices[0].message.content or ""
                     action = parse_action(assistant_text)
-                except Exception:
-                    action = {"action_type": "submit"}
+                except Exception as llm_err:
+                    traceback.print_exc(file=sys.stderr)
+                    # Fallback: if we have file content with markers, resolve deterministically
+                    fc = observation.get("file_content", "")
+                    cf = observation.get("conflict_files", [])
+                    if fc and "<<<<<<< " in fc and cf:
+                        action = {
+                            "action_type": "resolve_file",
+                            "file_path": cf[0],
+                            "content": _resolve_conflict_markers(fc),
+                        }
+                    else:
+                        action = {"action_type": "submit"}
                     assistant_text = json.dumps(action)
 
             step_resp = call_env("/step", method="POST", payload={"action": action})
